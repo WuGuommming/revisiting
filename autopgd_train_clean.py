@@ -178,7 +178,10 @@ def apgd_train(model, x, y, norm, eps, n_iter=10, use_rs=False, loss='ce',
     startt = time.time()
     logits = model(x_adv)
     times['fp'] += time.time() - startt
-    loss_indiv = criterion_indiv(logits, y)
+    if mixup is not None:
+        loss_indiv = criterion_indiv(logits, y.argmax(dim=1))
+    else:
+        loss_indiv = criterion_indiv(logits, y)
     loss = loss_indiv.sum()
     #grad += torch.autograd.grad(loss, [x_adv])[0].detach()
     startt = time.time()
@@ -272,7 +275,10 @@ def apgd_train(model, x, y, norm, eps, n_iter=10, use_rs=False, loss='ce',
         startt = time.time()
         logits = model(x_adv)
         times['fp'] += time.time() - startt
-        loss_indiv = criterion_indiv(logits, y)
+        if mixup is not None:
+            loss_indiv = criterion_indiv(logits, y.argmax(dim=1))
+        else:
+            loss_indiv = criterion_indiv(logits, y)
         loss = loss_indiv.sum()
         #times['blk1'] += time.time() - startt
         

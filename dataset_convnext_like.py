@@ -26,18 +26,23 @@ def build_dataset(is_train, args):
         for t in transform.transforms:
             print(t)
     print("---------------------------")
-    data_paths = ['/scratch/nsingh/imagenet', 
-                '/home/scratch/datasets/imagenet',
-                '/scratch_local/datasets/ImageNet2012',
-                '/scratch/datasets/imagenet/']
-    for data_path in data_paths:
-        if os.path.exists(data_path):
-            break
-    data_set = 'IMNET'
-    if data_set == 'CIFAR':
+    data_path = '../../datasets/'
+    if args.data_set == 'cifar100':
         dataset = datasets.CIFAR100(data_path, train=is_train, transform=transform, download=True)
         nb_classes = 100
-    elif data_set == 'IMNET':
+    elif args.data_set == 'flower':
+        if is_train:
+            dataset = Flowers102(root=data_path, split="test", transform=transform, download=True)
+        else:
+            dataset = Flowers102(root=data_path, split="val", transform=transform, download=True)
+        nb_classes = 102
+    elif args.data_set == 'gtsrb':
+        if is_train:
+            dataset = GTSRB(root=data_path, split="train", transform=transform, download=True)
+        else:
+            dataset = GTSRB(root=data_path, split="test", transform=transform, download=True)
+        nb_classes = 43
+    elif args.data_set == 'IMNET':
         print("reading from datapath", data_path)
         root = os.path.join(data_path, 'train' if is_train else 'val')
         dataset = datasets.ImageFolder(root, transform=transform)
@@ -68,9 +73,9 @@ def build_transform(is_train, args):
             color_jitter=args.color_jitter,
             auto_augment=args.aa,
             interpolation=args.train_interpolation,
-            re_prob=args.reprob,
-            re_mode=args.remode,
-            re_count=args.recount,
+            #re_prob=args.reprob,
+            #re_mode=args.remode,
+            #re_count=args.recount,
             mean=mean,
             std=std,
             scale=args.scale,

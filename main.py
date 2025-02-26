@@ -76,7 +76,7 @@ def sizeof_fmt(num, suffix="Flops"):
 
 
 import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning) 
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", category=FutureWarning)
 # warnings.filterwarnings("ignore", category=UserWarning)
@@ -155,7 +155,7 @@ Section('validation', 'Validation parameters stuff').params(
 
 Section('training', 'training hyper param stuff').params(
     eval_only=Param(int, 'eval only?', default=0),
-    batch_size=Param(int, 'The batch size', default=512),
+    batch_size=Param(int, 'The batch size', default=64),
     optimizer=Param(And(str, OneOf(['sgd', 'adamw'])), 'The optimizer', default='adamw'),
     momentum=Param(float, 'SGD momentum', default=0.9),
     weight_decay=Param(float, 'weight decay', default=0.05),
@@ -169,7 +169,7 @@ Section('training', 'training hyper param stuff').params(
 Section('dist', 'distributed training options').params(
     world_size=Param(int, 'number gpus', default=1),
     address=Param(str, 'address', default='localhost'),
-    port=Param(str, 'port', default='12355')
+    port=Param(str, 'port', default='23456')
 )
 
 Section('adv', 'adversarial training options').params(
@@ -239,9 +239,9 @@ def get_cosine_lr(epoch, lr, epochs, lr_peak_epoch):
     else:
         lr_min = 5e-6
         lr_t = lr_min + .5 * (lr - lr_min) * (1 + math.cos(math.pi * (
-            epoch - lr_peak_epoch) / (epochs - lr_peak_epoch)))
+                epoch - lr_peak_epoch) / (epochs - lr_peak_epoch)))
         return lr_t
-    
+
 
 class BlurPoolConv2d(ch.nn.Module):
     def __init__(self, conv):
@@ -255,7 +255,7 @@ class BlurPoolConv2d(ch.nn.Module):
         blurred = F.conv2d(x, self.blur_filter, stride=1, padding=(1, 1),
                            groups=self.conv.in_channels, bias=None)
         return self.conv.forward(blurred)
-        
+
 
 class WrappedModel(nn.Module):
     """ include the generation of adversarial perturbation in the
@@ -269,7 +269,7 @@ class WrappedModel(nn.Module):
         self.verbose = verbose
         #self.mu = mu
         #self.sigma = sigma
-        
+
     def forward(self, x, y=None):
         # TODO: handle varying threat models
         if self.perturb_input:
@@ -287,16 +287,16 @@ class WrappedModel(nn.Module):
                 print(f'inference time={inftime:.5f}')
             #print(z[0].is_contiguous())
             self.base_model.train()
-            
+
             if isinstance(z, (tuple, list)):
                 z = z[0]
             return self.base_model(z)
-            
+
         else:
             if self.verbose:
                 print('clean inference')
             return self.base_model(x)
-            
+
     def set_perturb(self, mode):
         self.perturb_input = mode
 
@@ -338,12 +338,12 @@ class ImageNetTrainer:
             self.setup_distributed()
 
         if not eval_only:
-            self.train_loader, self.val_loader, self.mixup_fn = self.create_train_loader()
+            self.train_loader, self.val_loader, self.mixup_fn, self.nb_classes = self.create_train_loader()
         # self.val_loader = self.create_val_loader()
-        self.model, self.scaler = self.create_model_and_scaler()
+        self.model, self.scaler = self.create_model_and_scaler(nb_classes=self.nb_classes)
         self.create_optimizer()
-        self.initialize_logger()
-        
+        self.initialize_logger(nb_classes=self.nb_classes)
+
 
     @param('dist.address')
     @param('dist.port')
@@ -405,13 +405,13 @@ class ImageNetTrainer:
                 # timm convnext uses different naming than resnet
                 excluded_params.append('.norm.')
             if arch in ['timm_resnet50_dw_patch-stem_gelu_stages-3393_convnext-bn_fewer-act-norm_ln',
-                'timm_resnet50_dw_patch-stem_gelu_stages-3393_convnext-bn_fewer-act-norm_ln_ds-sep',
-                'timm_resnet50_dw_patch-stem_gelu_stages-3393_convnext-bn_fewer-act-norm_ln_ds-sep_bias',
-                'timm_reimplemented_convnext_tiny']:
+                        'timm_resnet50_dw_patch-stem_gelu_stages-3393_convnext-bn_fewer-act-norm_ln_ds-sep',
+                        'timm_resnet50_dw_patch-stem_gelu_stages-3393_convnext-bn_fewer-act-norm_ln_ds-sep_bias',
+                        'timm_reimplemented_convnext_tiny']:
                 # in case LN is used instead of original BN and the naming is not changed
                 excluded_params.remove('bn')
             print('excluded params=', ', '.join(excluded_params))
-            
+
             bn_params = [v for k, v in all_params if any([c in k for c in excluded_params])] #('bn' in k) #or k.endswith('.bias')
             bn_keys = [k for k, v in all_params if any([c in k for c in excluded_params])]
             #print(', '.join(bn_keys))
@@ -419,16 +419,16 @@ class ImageNetTrainer:
             other_params = [v for k, v in all_params if not any([c in k for c in excluded_params])]  #not ('bn' in k) #or k.endswith('.bias')
         # se_only = True
         # elif se_only:
-            # other_params = []
-            # l = 0
-            # for name, param in self.model.named_parameters():
-            #     # print(name)
-            #     if "se_module" not in name:
-            #         # other_params.append(param)
-            #         param.requires_grad = False
-            #         l+=1
-            # print(l)
-            # exit()
+        # other_params = []
+        # l = 0
+        # for name, param in self.model.named_parameters():
+        #     # print(name)
+        #     if "se_module" not in name:
+        #         # other_params.append(param)
+        #         param.requires_grad = False
+        #         l+=1
+        # print(l)
+        # exit()
         else:
             print('automatically exclude bn and bias from weight decay')
             bn_params = []
@@ -443,7 +443,7 @@ class ImageNetTrainer:
                 else:
                     other_params.append(param)
             #print(', '.join(bn_keys))
-        
+
         param_groups = [{
             'params': bn_params,
             'weight_decay': 0.
@@ -461,7 +461,7 @@ class ImageNetTrainer:
         if self.mixup_fn is None:
             self.loss = ch.nn.CrossEntropyLoss()
         else:
-        # # smoothing is handled with mixup label transform
+            # # smoothing is handled with mixup label transform
             # self.loss = LabelSmoothingCrossEntropy(smoothing=label_smoothing)
             self.loss = SoftTargetCrossEntropy()
 
@@ -480,157 +480,66 @@ class ImageNetTrainer:
                             distributed, label_smoothing, in_memory, seed, augmentations, precision,
                             use_channel_last, world_size):
         torch.manual_seed(seed)
-        if False:
-            this_device = f'cuda:{self.gpu}'
-            print(this_device)
-            # train_path = Path(train_dataset)
-            data_paths = ['/scratch/fcroce42/ffcv_imagenet_data/train_400_0.50_90.ffcv',
-                '/scratch/nsingh/datasets/ffcv_imagenet_data/train_400_0.50_90.ffcv', '/scratch_local/datasets/ffcv_imagenet_data/train_400_0.50_90.ffcv']
-            for data_path in data_paths:
-                if os.path.exists(data_path):
-                    train_path = Path(data_path)
-                    break
-            print(train_path)
-            assert train_path.is_file()
-    
-            res = self.get_resolution(epoch=0)
-            prec = PREC_DICT[precision]
-            self.decoder = RandomResizedCropRGBImageDecoder((res, res))
-            if use_channel_last:
-                image_pipeline: List[Operation] = [
-                    self.decoder,
-                    RandomHorizontalFlip(),
-                    #Convert(np.float16),
-                    ToTensor(),
-                    #lambda x: x.contiguous(),
-                    ToDevice(ch.device(this_device), non_blocking=True),
-                    ToTorchImage(channels_last=True),
-                    NormalizeImage(NONORM_MEAN, NONORM_STD, #IMAGENET_MEAN, IMAGENET_STD,
-                        prec, #np.float16
-                        )
-                ]
-            else:
-                image_pipeline: List[Operation] = [
-                    self.decoder,
-                    RandomHorizontalFlip(),
-                    #Convert(np.float16),
-                    ToTensor(),
-                    #lambda x: x.contiguous(),
-                    ToDevice(ch.device(this_device), non_blocking=True),
-                    ToTorchImage(channels_last=False),
-                    #NormalizeImage(NONORM_MEAN, NONORM_STD, #IMAGENET_MEAN, IMAGENET_STD,
-                    #    prec, #np.float16
-                    #    )
-                    Convert(ch.cuda.HalfTensor), #float16
-                    torchvision.transforms.Normalize([0., 0., 0.], [255., 255., 255.]),
-                ]
-    
-            label_pipeline: List[Operation] = [
-                IntDecoder(),
-                ToTensor(),
-                Squeeze(),
-                ToDevice(ch.device(this_device), non_blocking=True)
-            ]
-    
-            order = OrderOption.RANDOM if distributed else OrderOption.QUASI_RANDOM
-            loader = Loader(train_dataset,
-                            batch_size=batch_size,
-                            num_workers=num_workers,
-                            order=order,
-                            os_cache=in_memory,
-                            drop_last=True,
-                            pipelines={
-                                'image': image_pipeline,
-                                'label': label_pipeline
-                            },
-                            distributed=distributed,
-                            seed=seed)
-                            
+
+        if augmentations:
+            args = parserr.Arguments_augment()
+
         else:
-            
-            if augmentations:
-                args = parserr.Arguments_augment()
+            args = parserr.Arguments_No_augment()
 
-            else:
-                args = parserr.Arguments_No_augment()
+        dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
+        if False:
+            args.dist_eval = False
+            dataset_val = None
+        else:
+            dataset_val, _ = build_dataset(is_train=False, args=args)
 
-            dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
-            if False:
-                args.dist_eval = False
-                dataset_val = None
-            else:
-                dataset_val, _ = build_dataset(is_train=False, args=args)
+        num_tasks = world_size
+        global_rank = self.gpu #utils.get_rank()
 
-            num_tasks = world_size
-            global_rank = self.gpu #utils.get_rank()
+        sampler_train = torch.utils.data.DistributedSampler(
+            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True, seed=seed,
+        )
+        print("Sampler_train = %s" % str(sampler_train))
+        if args.dist_eval:
+            if len(dataset_val) % num_tasks != 0:
+                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
+                      'equal num of samples per-process.')
+            sampler_val = torch.utils.data.DistributedSampler(
+                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+        else:
+            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-            sampler_train = torch.utils.data.DistributedSampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True, seed=seed,
-            )
-            print("Sampler_train = %s" % str(sampler_train))
-            if args.dist_eval:
-                if len(dataset_val) % num_tasks != 0:
-                    print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                            'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                            'equal num of samples per-process.')
-                sampler_val = torch.utils.data.DistributedSampler(
-                    dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
-            else:
-                sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-
-            data_loader_train = torch.utils.data.DataLoader(
-                dataset_train, sampler=sampler_train,
-                batch_size=batch_size,
+        data_loader_train = torch.utils.data.DataLoader(
+            dataset_train, sampler=sampler_train,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=True,
+        )
+        if dataset_val is not None:
+            data_loader_val = torch.utils.data.DataLoader(
+                dataset_val, sampler=sampler_val,
+                batch_size=int(1.5 * batch_size),
                 num_workers=num_workers,
                 pin_memory=True,
-                drop_last=True,
+                drop_last=False
             )
-            if dataset_val is not None:
-                data_loader_val = torch.utils.data.DataLoader(
-                    dataset_val, sampler=sampler_val,
-                    batch_size=int(1.5 * batch_size),
-                    num_workers=num_workers,
-                    pin_memory=True,
-                    drop_last=False
-                )
-            else:
-                data_loader_val = None
+        else:
+            data_loader_val = None
 
-            mixup_fn = None
-            mixup_active = (args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None) and augmentations
-            if mixup_active:
-                print("Mixup is activated!")
-                print(f"Using label smoothing:{label_smoothing}")
-                mixup_fn = Mixup(
-                    mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
-                    prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-                    label_smoothing=label_smoothing, num_classes=args.nb_classes)
+        mixup_fn = None
+        mixup_active = (args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None) and augmentations
+        if mixup_active:
+            print("Mixup is activated!")
+            print(f"Using label smoothing:{label_smoothing}")
+            mixup_fn = Mixup(
+                mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
+                prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
+                label_smoothing=label_smoothing, num_classes=args.nb_classes)
 
-            # assert not distributed
-            # self.decoder = None #RandomResizedCropRGBImageDecoder((res, res))
-            
-            # from robustness.datasets import DATASETS
-            # from robustness.tools import helpers
-            # data_paths = ['/home/scratch/datasets/imagenet',
-            #     '/scratch_local/datasets/ImageNet2012',
-            #     '/mnt/qb/datasets/ImageNet2012',
-            #     '/scratch/datasets/imagenet/']
-            # for data_path in data_paths:
-            #     if os.path.exists(data_path):
-            #         break
-            # print(f'found dataset at {data_path}')
-            # dataset = DATASETS['imagenet'](data_path) #'/home/scratch/datasets/imagenet'
-            
-            
-            # train_loader, val_loader = dataset.make_loaders(num_workers,
-            #                 batch_size, data_aug=True)
-        
-            # loader = helpers.DataPrefetcher(train_loader)
-            # #val_loader = helpers.DataPrefetcher(val_loader)
-                
-            
-
-        return data_loader_train, data_loader_val, mixup_fn
+        return data_loader_train, data_loader_val, mixup_fn, args.nb_classes
 
     @param('data.val_dataset')
     @param('data.num_workers')
@@ -645,11 +554,11 @@ class ImageNetTrainer:
         this_device = f'cuda:{self.gpu}'
         # val_path = Path(val_dataset)
         data_paths = ['/scratch/fcroce42/ffcv_imagenet_data/val_400_0.50_90.ffcv',
-                '/scratch/nsingh/datasets/ffcv_imagenet_data/val_400_0.50_90.ffcv', '/scratch_local/datasets/ffcv_imagenet_data/train_400_0.50_90.ffcv']
+                      '/scratch/nsingh/datasets/ffcv_imagenet_data/val_400_0.50_90.ffcv', '/scratch_local/datasets/ffcv_imagenet_data/train_400_0.50_90.ffcv']
         for data_path in data_paths:
-                if os.path.exists(data_path):
-                    val_path = Path(data_path)
-                    break
+            if os.path.exists(data_path):
+                val_path = Path(data_path)
+                break
         assert val_path.is_file()
         res_tuple = (resolution, resolution)
         prec = PREC_DICT[precision]
@@ -661,7 +570,7 @@ class ImageNetTrainer:
                 ToDevice(ch.device(this_device), non_blocking=True),
                 ToTorchImage(),
                 NormalizeImage(NONORM_MEAN, NONORM_STD, #IMAGENET_MEAN, IMAGENET_STD
-                    prec)
+                               prec)
             ]
         else:
             image_pipeline = [
@@ -678,7 +587,7 @@ class ImageNetTrainer:
             ToTensor(),
             Squeeze(),
             ToDevice(ch.device(this_device),
-            non_blocking=True)
+                     non_blocking=True)
         ]
 
         loader = Loader(val_dataset,
@@ -716,23 +625,24 @@ class ImageNetTrainer:
                 self.decoder.output_size = (res, res)
             except:
                 pass
-            train_loss = self.train_loop(epoch)
+            train_loss, train_acc = self.train_loop(epoch)
 
             if log_level > 0:
                 extra_dict = {
                     'train_loss': train_loss.item(),
+                    'train_acc': train_acc,
                     'epoch': epoch
                 }
 
                 self.eval_and_log(extra_dict)
-                
+
             if train_loss.isnan():
                 sys.exit()
-            
+
             # if attack == 'none':
-                ##### save every 10 epochs if 
+            ##### save every 10 epochs if
             save_freq = 1
-            
+
             self.eval_and_log({'epoch': epoch})
             if (self.gpu == 0 and epoch % save_freq == 0) or (self.gpu == 0 and epoch == epochs - 1):
                 ch.save(self.model.state_dict(), self.log_folder / f'weights_{epoch}.pt')
@@ -740,19 +650,19 @@ class ImageNetTrainer:
                     ch.save(timm.utils.model.get_state_dict(self.model_ema), self.log_folder / f'weights_ema_{epoch}.pt')
                     if epoch % 5 == 0 or epoch == epochs-1:
                         ch.save({
-                        'model_state_dict': self.model.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'loss_scaler_state_dict': self.scaler.state_dict(),
-                        'epoch': epoch,
-                        'state_dict_ema':timm.utils.model.get_state_dict(self.model_ema)
+                            'model_state_dict': self.model.state_dict(),
+                            'optimizer_state_dict': self.optimizer.state_dict(),
+                            'loss_scaler_state_dict': self.scaler.state_dict(),
+                            'epoch': epoch,
+                            'state_dict_ema':timm.utils.model.get_state_dict(self.model_ema)
                         }, self.log_folder / f'full_model_{epoch}.pth')
                 else:
                     if epoch % 5 == 0 or epoch == epochs-1:
                         ch.save({
-                        'model_state_dict': self.model.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'loss_scaler_state_dict': self.scaler.state_dict(),
-                        'epoch': epoch,
+                            'model_state_dict': self.model.state_dict(),
+                            'optimizer_state_dict': self.optimizer.state_dict(),
+                            'loss_scaler_state_dict': self.scaler.state_dict(),
+                            'epoch': epoch,
                         }, self.log_folder / f'full_model_{epoch}.pth')
 
     def eval_and_log(self, extra_dict={}):
@@ -792,26 +702,26 @@ class ImageNetTrainer:
     @param('adv.noise_level')
     @param('adv.skip_projection')
     def create_model_and_scaler(self, arch, pretrained, not_original, updated, model_ema, freeze_some, early, distributed, use_blurpool,
-        ckpt_path, add_normalization, attack, norm, eps, n_iter, verbose,
-        use_channel_last, alpha, noise_level, skip_projection):
+                                ckpt_path, add_normalization, attack, norm, eps, n_iter, verbose,
+                                use_channel_last, alpha, noise_level, skip_projection, nb_classes):
         scaler = GradScaler()
         if not arch.startswith('timm_'):
-            model = get_new_model(arch, pretrained=bool(pretrained), not_original=bool(not_original), updated=bool(updated))
+            model = get_new_model(arch, pretrained=bool(pretrained), not_original=bool(not_original), updated=bool(updated), nb_classes=nb_classes)
         else:
             try:
                 model = create_model(arch.replace('timm_', ''), pretrained=pretrained)
                 #model.drop_path_rate = .1
             except:
-                model = get_new_model(arch.replace('timm_', ''))
+                model = get_new_model(arch.replace('timm_', ''), nb_classes=nb_classes)
         verbose = verbose == 1
-        
+
         def apply_blurpool(mod: ch.nn.Module):
             for (name, child) in mod.named_children():
-                if isinstance(child, ch.nn.Conv2d) and (np.max(child.stride) > 1 and child.in_channels >= 16): 
+                if isinstance(child, ch.nn.Conv2d) and (np.max(child.stride) > 1 and child.in_channels >= 16):
                     setattr(mod, name, BlurPoolConv2d(child))
                 else: apply_blurpool(child)
         if use_blurpool: apply_blurpool(model)
-        
+
         if use_channel_last:
             print('using channel last memory format')
             model = model.to(memory_format=ch.channels_last)
@@ -821,8 +731,8 @@ class ImageNetTrainer:
         if bool(freeze_some):
             print(f"Freezing early layers: {bool(early)}")
             freeze_some_layers(model, early)
-        
-     
+
+
         if arch  != 'convnext_tiny_21k' and add_normalization:
             print('add normalization layer')
             model = normalize_model(model, IMAGENET_MEAN, IMAGENET_STD)
@@ -832,17 +742,17 @@ class ImageNetTrainer:
             print('using input perturbation layer')
             if attack == 'apgd':
                 attack = partial(apgd_train, norm=norm, eps=eps,
-                    n_iter=n_iter, verbose=verbose, mixup=self.mixup_fn)
+                                 n_iter=n_iter, verbose=verbose, mixup=self.mixup_fn)
             elif attack == 'fgsm':
                 attack = partial(fgsm_train, eps=eps,
-                    use_rs=True,
-                    alpha=alpha,
-                    noise_level=noise_level,
-                    skip_projection=skip_projection == 1
-                    )
+                                 use_rs=True,
+                                 alpha=alpha,
+                                 noise_level=noise_level,
+                                 skip_projection=skip_projection == 1
+                                 )
             print(attack)
             model = WrappedModel(model, attack, verbose=verbose)
-        
+
         if self.gpu == 0:
             print(model)
             inpp = torch.rand(1, 3, 224, 224)
@@ -856,7 +766,16 @@ class ImageNetTrainer:
         if not ckpt_path == '':
             ckpt = ch.load(ckpt_path, map_location='cpu')
             ckpt = {k.replace('module.', ''): v for k, v in ckpt.items()}
-            try:
+
+            model_dict = model.state_dict()
+            filtered_dict = {k: v for k, v in ckpt.items() if k in model_dict and v.size() == model_dict[k].size()}
+            missing_keys = set(model_dict.keys()) - set(filtered_dict.keys())
+            if missing_keys:
+                print("not load：", missing_keys)
+            model_dict.update(filtered_dict)
+            model.load_state_dict(model_dict)
+
+            '''try:
                 model.load_state_dict(ckpt)
                 print('standard loading')
 
@@ -869,7 +788,7 @@ class ImageNetTrainer:
                     ckpt = {k.replace('base_model.', ''): v for k, v in ckpt.items()}
                     # ckpt = {f'base_model.{k}': v for k, v in ckpt.items()}
                     model.load_state_dict(ckpt)
-                    print('loaded')
+                    print('loaded')'''
         #model = model.to(memory_format=ch.channels_last)
 
         # print(model.patch_embed(torch.rand((50, 3, 224, 224))))
@@ -877,11 +796,11 @@ class ImageNetTrainer:
         # if arch  != 'convnext_tiny_21k' and add_normalization:
         #     print('add normalization layer')
         #     model = normalize_model(model, IMAGENET_MEAN, IMAGENET_STD)
-        
+
         model = model.to(self.gpu)
         if bool(model_ema):
             print('Using EMA with decay 0.9999')
-        # Important to create EMA model after cuda(), DP wrapper, and AMP but before DDP wrapper
+            # Important to create EMA model after cuda(), DP wrapper, and AMP but before DDP wrapper
             self.model_ema = timm.utils.ModelEmaV2(model, decay=0.9999, device='cpu')
         else:
             self.model_ema = None
@@ -907,11 +826,11 @@ class ImageNetTrainer:
 
         # with ch.no_grad():
         with autocast(enabled=True):
-            for idx, (images, target) in enumerate(tqdm(self.val_loader)):
+            for idx, (images, target) in enumerate(tqdm(self.val_loader, mininterval=30, miniters=10)):
                 # if show_once:
                 #     print(images.shape, images.max(), images.min())
                 #     show_once = False
-                    
+
                 images = images.contiguous().cuda(self.gpu, non_blocking=True)
                 target = target.contiguous().cuda(self.gpu, non_blocking=True)
                 output = self.model(images)
@@ -920,7 +839,7 @@ class ImageNetTrainer:
 
                 # for k in ['top_1', 'top_5']:
                 #     self.val_meters[k](output, target)
-                    
+
                 acc += (output.max(1)[1] == target).sum()
                 n += target.shape[0]
                 # loss_val = self.loss(output, target)  #####. remove this comment
@@ -933,8 +852,8 @@ class ImageNetTrainer:
         # stats = {k: m.compute().item() for k, m in self.val_meters.items()}
         # if stats['top_1'] > self.best_rob_acc:
         #     self.best_rob_acc = stats['top_1']
-            # if self.gpu == 0:
-            #     ch.save(self.model.state_dict(), self.log_folder / 'best_adv_weights.pt')
+        # if self.gpu == 0:
+        #     ch.save(self.model.state_dict(), self.log_folder / 'best_adv_weights.pt')
         # [meter.reset() for meter in self.val_meters.values()]
         return ch.stack(accs)/ns, ns
 
@@ -945,6 +864,7 @@ class ImageNetTrainer:
         model = self.model
         model.train()
         losses = []
+        acces = []
         show_once = True
         perturb = attack != 'none'
         if perturb:
@@ -957,29 +877,21 @@ class ImageNetTrainer:
         iters = len(self.train_loader)
         lrs = np.interp(np.arange(iters), [0, iters], [lr_start, lr_end])
 
-        iterator = tqdm(self.train_loader)
+        iterator = tqdm(self.train_loader, mininterval=30, miniters=100)
         for ix, (images, target) in enumerate(iterator):
             images = images.cuda(self.gpu, non_blocking=True)
             target = target.cuda(self.gpu, non_blocking=True)
             # print(images.size(), target.size())
             if self.mixup_fn is not None:
                 images, target = self.mixup_fn(images, target)
-                
+
             if show_once:
                 # print(images.shape, images.max(), images.min())
                 show_once = False
-        
+
             ### Training start
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = lrs[ix]
-                
-            '''print(images.device)
-            images = images.reshape(images.shape) # make contiguous (and more)
-            if False:
-                ch.save(images, './train_imgs_cm.pth')
-                sys.exit()
-            target = target.reshape(target.shape)
-            print(images.device)'''
 
             self.optimizer.zero_grad(set_to_none=True)
             with autocast(enabled=True):
@@ -988,6 +900,7 @@ class ImageNetTrainer:
                 else:
                     output = self.model(images, target) # TODO: check the effect of .contiguous() for other models
                 loss_train = self.loss(output, target)
+                acc = (output.argmax(dim=1) == target).sum().item() / output.size(0)
 
             self.scaler.scale(loss_train).backward()
             self.scaler.step(self.optimizer)
@@ -995,35 +908,40 @@ class ImageNetTrainer:
             ### Training end
             if self.model_ema is not None:
                 self.model_ema.update(model)
-            
+
             #ch.cuda.synchronize()
 
             ### Logging start
-            if log_level > 0:
-                losses.append(loss_train.detach())
-
-                group_lrs = []
-                for _, group in enumerate(self.optimizer.param_groups):
-                    group_lrs.append(f'{group["lr"]:.3f}')
-
-                names = ['ep', 'iter', 'shape', 'lrs']
-                values = [epoch, ix, tuple(images.shape), group_lrs]
-                if log_level > 1:
-                    names += ['loss']
-                    values += [f'{loss_train.item():.3f}']
-
-                msg = ', '.join(f'{n}={v}' for n, v in zip(names, values))
-                iterator.set_description(msg)
+            if ix % 100 == 0 or ix == iters - 1:
+                if log_level > 0:
+                    losses.append(loss_train.detach())
+                    acces.append(acc)
+    
+                    group_lrs = []
+                    for _, group in enumerate(self.optimizer.param_groups):
+                        group_lrs.append(f'{group["lr"]:.3f}')
+    
+                    names = ['epoch', 'iter', 'shape', 'lrs']
+                    values = [epoch, ix, tuple(images.shape), group_lrs]
+                    if log_level > 1:
+                        names += ['loss']
+                        values += [f'{loss_train.item():.3f}']
+    
+                        names += ['acc']
+                        values += [f'{acc:.2%}']
+    
+                    msg = ', '.join(f'{n}={v}' for n, v in zip(names, values))
+                    iterator.set_description(msg)
             ### Logging end
 
-            
+
         if perturb:
             if distributed:
                 model.module.set_perturb(False)
             else:
                 model.set_perturb(False)
-            
-        return ch.stack(losses).mean()
+
+        return ch.stack(losses).mean(), sum(acces) / len(acces)
 
     @param('validation.lr_tta')
     @param('adv.attack')
@@ -1036,11 +954,11 @@ class ImageNetTrainer:
         best_test_rob = 0
         # with ch.no_grad():
         with autocast(enabled=True):
-            for idx, (images, target) in enumerate(tqdm(self.val_loader)):
+            for idx, (images, target) in enumerate(tqdm(self.val_loader, mininterval=30, miniters=10)):
                 # if show_once:
                 #     print(images.shape, images.max(), images.min())
                 #     show_once = False
-                    
+
                 images = images.contiguous()
                 target = target.contiguous()
                 # if attack != 'none':
@@ -1056,7 +974,7 @@ class ImageNetTrainer:
                 #     output += self.model(ch.flip(x_adv, dims=[3]))
                 for k in ['top_1', 'top_5']:
                     self.val_meters[k](output, target)
-                    
+
                 acc += (output.max(1)[1] == target).sum()
 
                 loss_val = self.loss(output, target)
@@ -1081,10 +999,10 @@ class ImageNetTrainer:
     @param('logging.addendum')
     @param('data.augmentations')
     @param('model.pretrained')
-    def initialize_logger(self, folder, arch, attack, updated, not_original, addendum, augmentations, pretrained):
+    def initialize_logger(self, folder, arch, attack, updated, not_original, addendum, augmentations, pretrained, nb_classes=None):
         self.val_meters = {
-            'top_1': torchmetrics.Accuracy(compute_on_step=False).to(self.gpu),
-            'top_5': torchmetrics.Accuracy(compute_on_step=False, top_k=5).to(self.gpu),
+            'top_1': torchmetrics.Accuracy(task="multiclass", num_classes=nb_classes, compute_on_step=False).to(self.gpu),
+            'top_5': torchmetrics.Accuracy(task="multiclass", num_classes=nb_classes, compute_on_step=False, top_k=5).to(self.gpu),
             'loss': MeanScalarMetric(compute_on_step=False).to(self.gpu)
         }
 
@@ -1179,3 +1097,17 @@ def make_config(quiet=False):
 if __name__ == "__main__":
     make_config()
     ImageNetTrainer.launch_from_args()
+
+'''
+
+CUDA_VISIBLE_DEVICES=1 python -u main.py --data.num_workers=12 --data.in_memory=1 \
+          --data.train_dataset=path-to-imagenet-train-set \
+         --data.val_dataset=path-to-imagenet-val-set \
+          --logging.folder=./folder/ --logging.log_level 2 \
+      --adv.attack apgd --adv.n_iter 2 --adv.norm Linf --training.distributed 1 --training.batch_size 64 --lr.lr 1e-3 --logging.save_freq 2  \
+      --resolution.min_res 224 --resolution.max_res 224 --data.seed 0 --data.augmentations 1 --model.add_normalization 0\
+       --model.not_original 1 --model.model_ema 1 --lr.lr_peak_epoch 20\
+      --training.label_smoothing 0.1 --logging.addendum='additional_text_appended_to_save_folder_name'\
+      --dist.world_size 1 --training.distributed 1 --model.pretrained 0 --model.arch vit_b --training.epochs 300  > test_train.txt 2>&1
+
+'''

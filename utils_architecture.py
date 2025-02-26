@@ -222,7 +222,7 @@ class IdentityLayer(nn.Module):
         return inputs
 
 
-def get_new_model(modelname, pretrained=True, not_original=False, updated=False):
+def get_new_model(modelname, pretrained=True, not_original=False, updated=False, nb_classes=100):
 
             
     if modelname == 'resnet50':
@@ -296,7 +296,7 @@ def get_new_model(modelname, pretrained=True, not_original=False, updated=False)
 
     elif modelname == 'vit_b':
         model = timm.models.vision_transformer.vit_base_patch16_224(pretrained=pretrained) # used for 21k pretrained on 206
-
+        model.head = nn.Linear(model.head.in_features, nb_classes)
         if not_original:
             model.patch_embed.proj = ConvBlock(48, end_siz=16, fin_dim=None)
 

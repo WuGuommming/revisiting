@@ -1,0 +1,5 @@
+*.pt
+folder/
+path-to-logging-folder/
+*.pyc
+__pycache————/
