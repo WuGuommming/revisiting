@@ -665,17 +665,18 @@ class ImageNetTrainer:
                             'epoch': epoch,
                         }, self.log_folder / f'full_model_{epoch}.pth')
 
+    @param('adv.attack')
     def eval_and_log(self, extra_dict={}):
         start_val = time.time()
-        stats = 0 #self.val_loop()
+        extra_dict['current_lr'] = self.optimizer.param_groups[0]['lr']
+        extra_dict['val_clean_acc'] = self.single_val()[0]
+
         val_time = time.time() - start_val
+        extra_dict['val_time'] = val_time
+        if attack != 'none':
+            extra_dict['val_rob_acc'] = self.val_loop['top_1']
         if self.gpu == 0:
-            self.log(dict({
-                'current_lr': self.optimizer.param_groups[0]['lr'],
-                'top_1': stats,
-                'top_5': stats,
-                'val_time': 0
-            }, **extra_dict))
+            self.log(extra_dict)
 
         return stats
 
@@ -826,7 +827,7 @@ class ImageNetTrainer:
 
         # with ch.no_grad():
         with autocast(enabled=True):
-            for idx, (images, target) in enumerate(tqdm(self.val_loader, mininterval=30, miniters=10)):
+            for idx, (images, target) in enumerate(tqdm(self.val_loader, mininterval=30, miniters=100)):
                 # if show_once:
                 #     print(images.shape, images.max(), images.min())
                 #     show_once = False
@@ -953,11 +954,15 @@ class ImageNetTrainer:
         acc = 0.
         best_test_rob = 0
         # with ch.no_grad():
+        perturb = attack != 'none'
+        if perturb:
+            if distributed:
+                model.module.set_perturb(True)
+            else:
+                model.set_perturb(True)
+
         with autocast(enabled=True):
-            for idx, (images, target) in enumerate(tqdm(self.val_loader, mininterval=30, miniters=10)):
-                # if show_once:
-                #     print(images.shape, images.max(), images.min())
-                #     show_once = False
+            for idx, (images, target) in enumerate(tqdm(self.val_loader, mininterval=30, miniters=100)):
 
                 images = images.contiguous()
                 target = target.contiguous()
@@ -967,7 +972,11 @@ class ImageNetTrainer:
                 #     if lr_tta:
                 #         output += self.model(ch.flip(x_adv, dims=[3]))
                 # else:
-                output = self.model(images)
+                if not perturb:
+                    output = self.model(images)
+                else:
+                    output = self.model(images, target)
+
                 if lr_tta:
                     output += self.model(ch.flip(images, dims=[3]))
                 # if lr_tta:
